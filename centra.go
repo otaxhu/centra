@@ -85,9 +85,9 @@ func Error(w http.ResponseWriter, r *http.Request, err error) {
 		DefaultUnknownHandler(w, r, err)
 		return
 	}
-	if err == nil {
+	if handler, ok := handlers[err]; ok {
 		// As special case, if err is nil, call unknown handler
-		handlers[nil](w, r, err)
+		handler(w, r, err)
 		return
 	}
 	for targetError, handler := range handlers {
