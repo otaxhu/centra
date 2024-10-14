@@ -22,10 +22,13 @@ import (
 	"strconv"
 )
 
+// Multiplexer error handler, multiplexes a call to [Error] to the registered error handler,
+// if error is not found, then a call to the registered UnknownHandler is made.
 type Mux struct {
 	handlers map[error]func(w http.ResponseWriter, r *http.Request, err error)
 }
 
+// Returns a new Mux with UnknownHandler set to DefaultUnknownError.
 func NewMux() *Mux {
 	return &Mux{
 		handlers: map[error]func(w http.ResponseWriter, r *http.Request, err error){
@@ -38,6 +41,8 @@ type keyHandlersType struct{}
 
 var keyHandlers keyHandlersType
 
+// Returns a middleware compatible with Chi router, that changes the request's context and adds
+// the error handlers to it.
 func (m *Mux) Build() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +53,8 @@ func (m *Mux) Build() func(http.Handler) http.Handler {
 	}
 }
 
+// Sets handler to handle err when a call to Error(w, r, errOrWrappedErr) is made in the context
+// of a http request.
 func (m *Mux) Handle(err error, handler func(w http.ResponseWriter, r *http.Request, err error)) {
 	if err == nil {
 		panic("centra: err must not be nil")
@@ -57,21 +64,20 @@ func (m *Mux) Handle(err error, handler func(w http.ResponseWriter, r *http.Requ
 		panic("centra: handler must not be nil")
 	}
 
-	_, ok := m.handlers[err]
-	if ok {
-		panic(fmt.Sprintf("centra: cannot register more than one handler for the same error: %s", err.Error()))
-	}
-
 	m.handlers[err] = handler
 }
 
-func (m *Mux) HandleUnknown(handler func(w http.ResponseWriter, r *http.Request, err error)) {
+// Sets handler to handle unknown errors when a call to Error(w, r, err) doesn't find a registered
+// error handler for err.
+func (m *Mux) UnknownHandler(handler func(w http.ResponseWriter, r *http.Request, err error)) {
 	if handler == nil {
 		panic("centra: handler must not be nil")
 	}
 	m.handlers[nil] = handler
 }
 
+// Error search for registered error handlers to handle err, if no error handler is found, then
+// it calls the registered UnknownHandler
 func Error(w http.ResponseWriter, r *http.Request, err error) {
 	handlers := getHandlers(r)
 	if handlers == nil {
@@ -90,8 +96,12 @@ func Error(w http.ResponseWriter, r *http.Request, err error) {
 			return
 		}
 	}
+
+	// if err is not registered, then call unknown error handler
+	handlers[nil](w, r, err)
 }
 
+// Default error handler for unknown errors
 func DefaultUnknownHandler(w http.ResponseWriter, r *http.Request, err error) {
 	response := "<h1>Internal Server Error</h1>"
 
