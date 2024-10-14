@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 )
@@ -26,6 +27,7 @@ import (
 // if error is not found, then a call to the registered UnknownHandler is made.
 type Mux struct {
 	handlers map[error]func(w http.ResponseWriter, r *http.Request, err error)
+	options  Options
 }
 
 // Returns a new Mux with UnknownHandler set to DefaultUnknownError.
@@ -34,7 +36,16 @@ func NewMux() *Mux {
 		handlers: map[error]func(w http.ResponseWriter, r *http.Request, err error){
 			nil: DefaultUnknownHandler,
 		},
+		options: Options{
+			Debug:  false,
+			Logger: log.Default(),
+		},
 	}
+}
+
+type Options struct {
+	Debug  bool
+	Logger *log.Logger
 }
 
 type keyHandlersType struct{}
@@ -46,7 +57,7 @@ var keyHandlers keyHandlersType
 func (m *Mux) Build() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r = r.WithContext(context.WithValue(r.Context(), keyHandlers, m.handlers))
+			r = r.WithContext(context.WithValue(r.Context(), keyHandlers, m))
 
 			next.ServeHTTP(w, r)
 		})
@@ -76,29 +87,59 @@ func (m *Mux) UnknownHandler(handler func(w http.ResponseWriter, r *http.Request
 	m.handlers[nil] = handler
 }
 
+func (m *Mux) Options(options Options) {
+	if options.Logger == nil {
+		options.Logger = log.Default()
+	}
+	m.options = options
+}
+
+func (m *Mux) log(err error, found bool) {
+	if !m.options.Debug {
+		return
+	}
+
+	prefix := "centra: DEBUG: "
+
+	if !found {
+		m.options.Logger.Printf(prefix+"Unknown handler has been called for the following error `%s`", err.Error())
+		return
+	}
+
+	if err == nil {
+		m.options.Logger.Println(prefix + "Unknown handler has been called, err is <nil>")
+		return
+	}
+
+	m.options.Logger.Printf(prefix+"Handler for error `%s` has been called", err.Error())
+}
+
 // Error search for registered error handlers to handle err, if no error handler is found, then
 // it calls the registered UnknownHandler
 func Error(w http.ResponseWriter, r *http.Request, err error) {
-	handlers := getHandlers(r)
-	if handlers == nil {
+	mux := getMux(r)
+	if mux == nil {
 		// Mux has not been initialized, should we panic or call default handle unknown?
 		DefaultUnknownHandler(w, r, err)
 		return
 	}
-	if handler, ok := handlers[err]; ok {
+	if handler, ok := mux.handlers[err]; ok {
+		mux.log(err, true)
 		// As special case, if err is nil, call unknown handler
 		handler(w, r, err)
 		return
 	}
-	for targetError, handler := range handlers {
+	for targetError, handler := range mux.handlers {
 		if errors.Is(err, targetError) {
+			mux.log(err, true)
 			handler(w, r, err)
 			return
 		}
 	}
 
+	mux.log(err, false)
 	// if err is not registered, then call unknown error handler
-	handlers[nil](w, r, err)
+	mux.handlers[nil](w, r, err)
 }
 
 // Default error handler for unknown errors
@@ -113,6 +154,6 @@ func DefaultUnknownHandler(w http.ResponseWriter, r *http.Request, err error) {
 	fmt.Fprint(w, response)
 }
 
-func getHandlers(r *http.Request) map[error]func(w http.ResponseWriter, r *http.Request, err error) {
-	return r.Context().Value(keyHandlers).(map[error]func(w http.ResponseWriter, r *http.Request, err error))
+func getMux(r *http.Request) *Mux {
+	return r.Context().Value(keyHandlers).(*Mux)
 }
