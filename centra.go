@@ -26,14 +26,14 @@ import (
 // Multiplexer error handler, multiplexes a call to [Error] to the registered error handler,
 // if error is not found, then a call to the registered UnknownHandler is made.
 type Mux struct {
-	handlers map[error]func(w http.ResponseWriter, r *http.Request, err error)
+	handlers map[error]ErrorHandlerFunc
 	options  Options
 }
 
 // Returns a new Mux with UnknownHandler set to DefaultUnknownError.
 func NewMux() *Mux {
 	return &Mux{
-		handlers: map[error]func(w http.ResponseWriter, r *http.Request, err error){
+		handlers: map[error]ErrorHandlerFunc{
 			nil: DefaultUnknownHandler,
 		},
 		options: Options{
@@ -43,10 +43,14 @@ func NewMux() *Mux {
 	}
 }
 
+// Options to be passed to Mux
 type Options struct {
 	Debug  bool
 	Logger *log.Logger
 }
+
+// Function type to handle errors
+type ErrorHandlerFunc func(w http.ResponseWriter, r *http.Request, err error)
 
 type keyHandlersType struct{}
 
@@ -66,7 +70,7 @@ func (m *Mux) Build() func(http.Handler) http.Handler {
 
 // Sets handler to handle err when a call to Error(w, r, errOrWrappedErr) is made in the context
 // of a http request.
-func (m *Mux) Handle(err error, handler func(w http.ResponseWriter, r *http.Request, err error)) {
+func (m *Mux) Handle(err error, handler ErrorHandlerFunc) {
 	if err == nil {
 		panic("centra: err must not be nil")
 	}
@@ -80,13 +84,14 @@ func (m *Mux) Handle(err error, handler func(w http.ResponseWriter, r *http.Requ
 
 // Sets handler to handle unknown errors when a call to Error(w, r, err) doesn't find a registered
 // error handler for err.
-func (m *Mux) UnknownHandler(handler func(w http.ResponseWriter, r *http.Request, err error)) {
+func (m *Mux) UnknownHandler(handler ErrorHandlerFunc) {
 	if handler == nil {
 		panic("centra: handler must not be nil")
 	}
 	m.handlers[nil] = handler
 }
 
+// Sets options to Mux
 func (m *Mux) Options(options Options) {
 	if options.Logger == nil {
 		options.Logger = log.Default()
