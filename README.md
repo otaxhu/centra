@@ -1,5 +1,14 @@
 # Centralized HTTP Error Handling
 
+<div>
+  <a href='https://pkg.go.dev/github.com/otaxhu/centra'>
+    <img src='https://pkg.go.dev/badge/github.com/otaxhu/centra' alt='Go Reference'>
+  </a>
+  <a href='https://coveralls.io/github/otaxhu/centra?branch=main'>
+    <img src='https://coveralls.io/repos/github/otaxhu/centra/badge.svg?branch=main' alt='Coverage Status'>
+  </a>
+</div>
+
 Tired of writing the following code?:
 ```go
 func GetUser(w http.ResponseWriter, r *http.Request) {
