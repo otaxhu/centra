@@ -1,11 +1,17 @@
 # Centralized HTTP Error Handling
 
 <div>
-  <a href='https://pkg.go.dev/github.com/otaxhu/centra'>
-    <img src='https://pkg.go.dev/badge/github.com/otaxhu/centra' alt='Go Reference'>
+  <a href="https://pkg.go.dev/github.com/otaxhu/centra">
+    <img src="https://pkg.go.dev/badge/github.com/otaxhu/centra" alt="Go Reference">
   </a>
-  <a href='https://coveralls.io/github/otaxhu/centra?branch=main'>
-    <img src='https://coveralls.io/repos/github/otaxhu/centra/badge.svg?branch=main' alt='Coverage Status'>
+  <a href="https://coveralls.io/github/otaxhu/centra?branch=main">
+    <img src="https://coveralls.io/repos/github/otaxhu/centra/badge.svg?branch=main" alt="Coverage Status">
+  </a>
+  <a href="https://goreportcard.com/report/github.com/otaxhu/centra">
+    <img src="https://goreportcard.com/badge/github.com/otaxhu/centra" alt="Go Report Card">
+  </a>
+  <a href="https://github.com/otaxhu/centra/actions/workflows/ci.yml">
+    <img src="https://github.com/otaxhu/centra/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI Status">
   </a>
 </div>
 
