@@ -17,17 +17,16 @@ package centra
 import (
 	"context"
 	"errors"
-	"fmt"
-	"log"
 	"net/http"
 	"strconv"
+	"sync"
 )
 
 // Multiplexer error handler, multiplexes a call to [Error] to the registered error handler,
 // if error is not found, then a call to the registered UnknownHandler is made.
 type Mux struct {
 	handlers map[error]ErrorHandlerFunc
-	options  Options
+	mu       sync.RWMutex
 }
 
 // Returns a new Mux with UnknownHandler set to DefaultUnknownError.
@@ -36,32 +35,20 @@ func NewMux() *Mux {
 		handlers: map[error]ErrorHandlerFunc{
 			nil: DefaultUnknownHandler,
 		},
-		options: Options{
-			Debug:  false,
-			Logger: log.Default(),
-		},
 	}
-}
-
-// Options to be passed to Mux
-type Options struct {
-	Debug  bool
-	Logger *log.Logger
 }
 
 // Function type to handle errors
 type ErrorHandlerFunc func(w http.ResponseWriter, r *http.Request, err error)
 
-type keyHandlersType struct{}
-
-var keyHandlers keyHandlersType
+type keyContext struct{}
 
 // Returns a middleware compatible with Chi router, that changes the request's context and adds
 // the error handlers to it.
 func (m *Mux) Build() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r = r.WithContext(context.WithValue(r.Context(), keyHandlers, m))
+			r = r.WithContext(context.WithValue(r.Context(), keyContext{}, m))
 
 			next.ServeHTTP(w, r)
 		})
@@ -79,6 +66,9 @@ func (m *Mux) Handle(err error, handler ErrorHandlerFunc) {
 		panic("centra: handler must not be nil")
 	}
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.handlers[err] = handler
 }
 
@@ -88,35 +78,20 @@ func (m *Mux) UnknownHandler(handler ErrorHandlerFunc) {
 	if handler == nil {
 		panic("centra: handler must not be nil")
 	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.handlers[nil] = handler
 }
 
-// Sets options to Mux
-func (m *Mux) Options(options Options) {
-	if options.Logger == nil {
-		options.Logger = log.Default()
-	}
-	m.options = options
-}
+// Returns the registered UnknownHandler, if [Mux.UnknownHandler] has not been called yet,
+// by default it is [DefaultUnknownHandler]
+func (m *Mux) GetUnknownHandler() ErrorHandlerFunc {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-func (m *Mux) log(err error, found bool) {
-	if !m.options.Debug {
-		return
-	}
-
-	prefix := "centra: DEBUG: "
-
-	if !found {
-		m.options.Logger.Printf(prefix+"Unknown handler has been called for the following error `%s`", err.Error())
-		return
-	}
-
-	if err == nil {
-		m.options.Logger.Println(prefix + "Unknown handler has been called, err is <nil>")
-		return
-	}
-
-	m.options.Logger.Printf(prefix+"Handler for error `%s` has been called", err.Error())
+	return m.handlers[nil]
 }
 
 // Error search for registered error handlers to handle err, if no error handler is found, then
@@ -124,30 +99,34 @@ func (m *Mux) log(err error, found bool) {
 func Error(w http.ResponseWriter, r *http.Request, err error) {
 	mux := getMux(r)
 	if mux == nil {
-		// Mux has not been initialized, should we panic or call default handle unknown?
-		DefaultUnknownHandler(w, r, err)
-		return
+		// TODO: panic or DefaultUnknownHandler?
+		//
+		// For now we are panicking, since this should be a invalid state for the library,
+		// and calling Default may not be desired behaviour.
+		panic("centra: Mux has not been initialized, cannot call Error() for this request")
 	}
+	mux.mu.RLock()
+	defer mux.mu.RUnlock()
 	if handler, ok := mux.handlers[err]; ok {
-		mux.log(err, true)
 		// As special case, if err is nil, call unknown handler
 		handler(w, r, err)
 		return
 	}
 	for targetError, handler := range mux.handlers {
 		if errors.Is(err, targetError) {
-			mux.log(err, true)
 			handler(w, r, err)
 			return
 		}
 	}
 
-	mux.log(err, false)
 	// if err is not registered, then call unknown error handler
 	mux.handlers[nil](w, r, err)
 }
 
 // Default error handler for unknown errors
+//
+// Writes string "<h1>Internal Server Error</h1>" to w, sets Content-Type to "text/html"
+// and writes status code 500
 func DefaultUnknownHandler(w http.ResponseWriter, r *http.Request, err error) {
 	response := "<h1>Internal Server Error</h1>"
 
@@ -156,9 +135,10 @@ func DefaultUnknownHandler(w http.ResponseWriter, r *http.Request, err error) {
 
 	w.WriteHeader(http.StatusInternalServerError)
 
-	fmt.Fprint(w, response)
+	w.Write([]byte(response))
 }
 
 func getMux(r *http.Request) *Mux {
-	return r.Context().Value(keyHandlers).(*Mux)
+	m, _ := r.Context().Value(keyContext{}).(*Mux)
+	return m
 }

@@ -15,6 +15,7 @@
 package centra
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -38,7 +39,7 @@ func (ew errStringWrapped) Unwrap() error {
 }
 
 func TestHandleAndError(t *testing.T) {
-	fnErrorFactory := func(message string) func(w http.ResponseWriter, r *http.Request, err error) {
+	fnErrorFactory := func(message string) ErrorHandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request, err error) {
 			io.WriteString(w, message)
 		}
@@ -58,41 +59,88 @@ func TestHandleAndError(t *testing.T) {
 
 	testCases := map[string]struct {
 		FinalHandler   http.HandlerFunc
-		ErrorsToHandle map[error]func(w http.ResponseWriter, r *http.Request, err error)
+		ErrorsToHandle map[error]ErrorHandlerFunc
 
-		ExpectedBuf string
+		ExpectedBuf   string
+		ExpectedPanic bool
 	}{
 		"Error": {
 			FinalHandler: fnFailingFinalFactory(errString("Fail")),
-			ErrorsToHandle: map[error]func(w http.ResponseWriter, r *http.Request, err error){
+			ErrorsToHandle: map[error]ErrorHandlerFunc{
 				errString("Fail"): fnErrorFactory("1"),
 			},
 
-			ExpectedBuf: "1",
+			ExpectedBuf:   "1",
+			ExpectedPanic: false,
 		},
 		"Error_Wrapped": {
 			FinalHandler: fnFailingFinalFactory(errStringWrapped("Fail")),
-			ErrorsToHandle: map[error]func(w http.ResponseWriter, r *http.Request, err error){
+			ErrorsToHandle: map[error]ErrorHandlerFunc{
 
 				errString("Fail_UNWRAP"): fnErrorFactory("1"),
 			},
 
-			ExpectedBuf: "1",
+			ExpectedBuf:   "1",
+			ExpectedPanic: false,
 		},
 		"Ok": {
 			FinalHandler: fnOkFinalFactory("1"),
-			ErrorsToHandle: map[error]func(w http.ResponseWriter, r *http.Request, err error){
+			ErrorsToHandle: map[error]ErrorHandlerFunc{
 				errString("Unreachable"): fnErrorFactory("2"),
 			},
 
-			ExpectedBuf: "1",
+			ExpectedBuf:   "1",
+			ExpectedPanic: false,
+		},
+		"Error_Unknown_Default": {
+			FinalHandler:   fnFailingFinalFactory(errors.New("Unknown")),
+			ErrorsToHandle: map[error]ErrorHandlerFunc{},
+			ExpectedBuf:    "<h1>Internal Server Error</h1>",
+			ExpectedPanic:  false,
+		},
+		"Error_Unknown_Setted": {
+			FinalHandler: fnFailingFinalFactory(errors.New("Unknown")),
+			ErrorsToHandle: map[error]ErrorHandlerFunc{
+				// Unknown handler
+				nil: fnErrorFactory("2"),
+			},
+			ExpectedBuf:   "2",
+			ExpectedPanic: false,
+		},
+		"Panic_Handler_IsNil": {
+			FinalHandler: fnOkFinalFactory("1"),
+			ErrorsToHandle: map[error]ErrorHandlerFunc{
+				errString("err"): nil,
+			},
+			ExpectedBuf:   "",
+			ExpectedPanic: true,
+		},
+		"Panic_Unknown_Handler_IsNil": {
+			FinalHandler: fnOkFinalFactory("1"),
+			ErrorsToHandle: map[error]ErrorHandlerFunc{
+				nil: nil,
+			},
+			ExpectedBuf:   "",
+			ExpectedPanic: true,
 		},
 	}
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
+			defer func() {
+				r := recover()
+				if tc.ExpectedPanic && r == nil {
+					t.Fatalf("expected to panic, did not panic")
+				} else if !tc.ExpectedPanic && r != nil {
+					t.Fatalf("expected to not panic, did panic: %v", r)
+				}
+			}()
 			errMux := NewMux()
 			for k, v := range tc.ErrorsToHandle {
+				if k == nil {
+					errMux.UnknownHandler(v)
+					continue
+				}
 				errMux.Handle(k, v)
 			}
 
