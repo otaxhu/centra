@@ -14,6 +14,7 @@
     <img src="https://github.com/otaxhu/centra/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI Status">
   </a>
 </div>
+<br>
 
 Tired of writing the following code?:
 ```go
