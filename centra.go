@@ -22,18 +22,26 @@ import (
 	"sync"
 )
 
+type handlerStruct struct {
+	err     error
+	handler ErrorHandlerFunc
+}
+
 // Multiplexer error handler, multiplexes a call to [Error] to the registered error handler,
 // if error is not found, then a call to the registered UnknownHandler is made.
 type Mux struct {
-	handlers map[error]ErrorHandlerFunc
-	mu       sync.RWMutex
+	handlersStack []handlerStruct
+	mu            sync.RWMutex
 }
 
 // Returns a new Mux with UnknownHandler set to DefaultUnknownError.
 func NewMux() *Mux {
 	return &Mux{
-		handlers: map[error]ErrorHandlerFunc{
-			nil: DefaultUnknownHandler,
+		handlersStack: []handlerStruct{
+			{
+				err:     nil,
+				handler: DefaultUnknownHandler,
+			},
 		},
 	}
 }
@@ -43,16 +51,14 @@ type ErrorHandlerFunc func(w http.ResponseWriter, r *http.Request, err error)
 
 type keyContext struct{}
 
-// Returns a middleware compatible with Chi router, that changes the request's context and adds
+// Middleware handler, compatible with Chi router, changes the request's context and adds
 // the error handlers to it.
-func (m *Mux) Build() func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r = r.WithContext(context.WithValue(r.Context(), keyContext{}, m))
+func (m *Mux) Handler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(context.WithValue(r.Context(), keyContext{}, m))
 
-			next.ServeHTTP(w, r)
-		})
-	}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Sets handler to handle err when a call to Error(w, r, errOrWrappedErr) is made in the context
@@ -69,7 +75,14 @@ func (m *Mux) Handle(err error, handler ErrorHandlerFunc) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.handlers[err] = handler
+	if len(m.handlersStack) == 0 {
+		panic("centra: Mux has not been initialized correctly, please call NewMux()")
+	}
+
+	m.handlersStack = append(m.handlersStack, handlerStruct{
+		err:     err,
+		handler: handler,
+	})
 }
 
 // Sets handler to handle unknown errors when a call to Error(w, r, err) doesn't find a registered
@@ -82,7 +95,14 @@ func (m *Mux) UnknownHandler(handler ErrorHandlerFunc) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.handlers[nil] = handler
+	if len(m.handlersStack) == 0 {
+		panic("centra: Mux has not been initialized correctly, please call NewMux()")
+	}
+
+	m.handlersStack[0] = handlerStruct{
+		err:     nil,
+		handler: handler,
+	}
 }
 
 // Returns the registered UnknownHandler, if [Mux.UnknownHandler] has not been called yet,
@@ -91,7 +111,11 @@ func (m *Mux) GetUnknownHandler() ErrorHandlerFunc {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	return m.handlers[nil]
+	if len(m.handlersStack) == 0 {
+		panic("centra: Mux has not been initialized correctly, please call NewMux()")
+	}
+
+	return m.handlersStack[0].handler
 }
 
 // Error search for registered error handlers to handle err, if no error handler is found, then
@@ -107,20 +131,24 @@ func Error(w http.ResponseWriter, r *http.Request, err error) {
 	}
 	mux.mu.RLock()
 	defer mux.mu.RUnlock()
-	if handler, ok := mux.handlers[err]; ok {
-		// As special case, if err is nil, call unknown handler
-		handler(w, r, err)
+	if len(mux.handlersStack) == 0 {
+		panic("centra: Mux has not been initialized, cannot call Error() for this request")
+	}
+	if err == nil {
+		// as a special case, if err is nil, call unknown handler
+		mux.handlersStack[0].handler(w, r, err)
 		return
 	}
-	for targetError, handler := range mux.handlers {
-		if errors.Is(err, targetError) {
-			handler(w, r, err)
+	for i := len(mux.handlersStack) - 1; i >= 1; i-- {
+		h := mux.handlersStack[i]
+		if errors.Is(err, h.err) {
+			h.handler(w, r, err)
 			return
 		}
 	}
 
 	// if err is not registered, then call unknown error handler
-	mux.handlers[nil](w, r, err)
+	mux.handlersStack[0].handler(w, r, err)
 }
 
 // Default error handler for unknown errors

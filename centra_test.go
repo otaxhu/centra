@@ -107,6 +107,14 @@ func TestHandleAndError(t *testing.T) {
 			ExpectedBuf:   "2",
 			ExpectedPanic: false,
 		},
+		"Error_Is_Nil": {
+			FinalHandler: fnFailingFinalFactory(nil),
+			ErrorsToHandle: map[error]ErrorHandlerFunc{
+				nil: fnErrorFactory("2"),
+			},
+			ExpectedBuf:   "2",
+			ExpectedPanic: false,
+		},
 		"Panic_Handler_IsNil": {
 			FinalHandler: fnOkFinalFactory("1"),
 			ErrorsToHandle: map[error]ErrorHandlerFunc{
@@ -148,8 +156,7 @@ func TestHandleAndError(t *testing.T) {
 
 			recorder := httptest.NewRecorder()
 
-			errMw := errMux.Build()
-			errMw(tc.FinalHandler).ServeHTTP(recorder, req)
+			errMux.Handler(tc.FinalHandler).ServeHTTP(recorder, req)
 
 			if tc.ExpectedBuf != recorder.Body.String() {
 				t.Fatalf("expected %s, got %s", tc.ExpectedBuf, recorder.Body.String())
