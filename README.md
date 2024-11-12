@@ -14,7 +14,13 @@
     <img src="https://github.com/otaxhu/centra/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI Status">
   </a>
 </div>
-<br>
+
+## Installation:
+```sh
+$ go get github.com/otaxhu/centra
+```
+
+## Usage:
 
 Tired of writing the following code?:
 ```go
@@ -91,14 +97,13 @@ func main() {
 
     // Optionally you can set unknown handler, by default is DefaultUnknownHandler,
     // which just sends "Internal Server Error" string with "text/html" Content-Type
-    errMux.HandleUnknown(func(w http.ResponseWriter, r *http.Request, err error) {
+    errMux.UnknownHandler(func(w http.ResponseWriter, r *http.Request, err error) {
         w.WriteHeader(http.StatusInternalServerError)
     })
 
-    // Build method returns the error handler as a middleware function, compatible with
-    // Chi router
-    errMw := errMux.Build()
-    mux.Use(errMw)
+    // Handler method is a middleware function that stores all of the handlers in the
+    // HTTP request context, compatible with Chi router.
+    mux.Use(errMux.Handler)
 
     mux.Get("/users", GetUser)
     mux.Post("/users", PostUser)
@@ -129,3 +134,49 @@ func GetUser(w http.ResponseWriter, r *http.Request) {
 The library will know that the underlying error is `ErrBadSearchParameters` and will match succesfully with the registered error handler.
 
 NOTE: library will not unwrap the error, it will pass it to the error handler just as it is.
+
+## Some Advices:
+
+To avoid defining too many public sentinel errors, you can create a "Base" error, then create your own error type that implements method `Unwrap() error` (that returns "Base") or `Is(err error) bool` (that returns true when "Base" is passed), depending on your use-case. For example:
+
+```go
+var ErrBase = errors.New("ErrBase")
+
+type SpecificError struct {
+    StatusCode int
+    Message    string
+}
+
+func (s SpecificError) Error() string {
+    return s.Message
+}
+
+// This method will be called when centra.Error() is called in an HTTP request.
+func (s SpecificError) Unwrap() error {
+    return ErrBase
+}
+
+func main() {
+    mux := chi.NewMux()
+
+    errMux := centra.NewMux()
+
+    errMux.Handle(ErrBase, func(w http.ResponseWriter, r *http.Request, err error) {
+        // Here we convert err to an SpecificError
+        specificErr := err.(*SpecificError)
+        w.WriteHeader(specificErr.StatusCode)
+        w.Write([]byte(specificErr.Message))
+    })
+
+    mux.Use(errMux.Handler)
+
+    mux.Get("/err", func(w http.ResponseWriter, r *http.Request) {
+        // This function will call the registered handler for ErrBase, since
+        // Unwrap method returns ErrBase
+        centra.Error(w, r, &SpecificError{
+            StatusCode: 500,
+            Message:    "message",
+        })
+    })
+}
+```
