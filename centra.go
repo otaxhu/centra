@@ -75,10 +75,6 @@ func (m *Mux) Handle(err error, handler ErrorHandlerFunc) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if len(m.handlersStack) == 0 {
-		panic("centra: Mux has not been initialized correctly, please call NewMux()")
-	}
-
 	m.handlersStack = append(m.handlersStack, handlerStruct{
 		err:     err,
 		handler: handler,
@@ -95,10 +91,6 @@ func (m *Mux) UnknownHandler(handler ErrorHandlerFunc) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if len(m.handlersStack) == 0 {
-		panic("centra: Mux has not been initialized correctly, please call NewMux()")
-	}
-
 	m.handlersStack[0] = handlerStruct{
 		err:     nil,
 		handler: handler,
@@ -110,10 +102,6 @@ func (m *Mux) UnknownHandler(handler ErrorHandlerFunc) {
 func (m *Mux) GetUnknownHandler() ErrorHandlerFunc {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
-	if len(m.handlersStack) == 0 {
-		panic("centra: Mux has not been initialized correctly, please call NewMux()")
-	}
 
 	return m.handlersStack[0].handler
 }
@@ -131,9 +119,6 @@ func Error(w http.ResponseWriter, r *http.Request, err error) {
 	}
 	mux.mu.RLock()
 	defer mux.mu.RUnlock()
-	if len(mux.handlersStack) == 0 {
-		panic("centra: Mux has not been initialized, cannot call Error() for this request")
-	}
 	if err == nil {
 		// as a special case, if err is nil, call unknown handler
 		mux.handlersStack[0].handler(w, r, err)
